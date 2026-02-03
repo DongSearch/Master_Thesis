@@ -252,22 +252,22 @@ class SmallREG(nn.Module):
 
         return x
     
+# test
+# model = SmallREG(
+#         input_size=32,
+#         patch_size=2,       
+#         hidden_size=384,   
+#         depth=28,          
+#         num_heads=12,
+#         num_classes=10
+#     ).to(device)
 
-model = SmallREG(
-        input_size=32,
-        patch_size=2,       
-        hidden_size=384,   
-        depth=28,          
-        num_heads=12,
-        num_classes=10
-    ).to(device)
+# dummy_x = torch.randn(4, 3, 32, 32).to(device) # Batch 4, RGB, 32x32
+# dummy_t = torch.rand(4).to(device)             # Random timesteps (0~1)
+# dummy_y = torch.randint(0, 10, (4,)).to(device) # Random labels
 
-dummy_x = torch.randn(4, 3, 32, 32).to(device) # Batch 4, RGB, 32x32
-dummy_t = torch.rand(4).to(device)             # Random timesteps (0~1)
-dummy_y = torch.randint(0, 10, (4,)).to(device) # Random labels
-
-output = model(dummy_x, dummy_t, dummy_y)
-print(output.shape) # torch.Size([4, 3, 32, 32])
+# output = model(dummy_x, dummy_t, dummy_y)
+# print(output.shape) # torch.Size([4, 3, 32, 32])
 
 
 
