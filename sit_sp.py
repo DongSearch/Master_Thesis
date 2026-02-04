@@ -188,7 +188,7 @@ class SmallREG(nn.Module):
         nn.init.normal_(self.pos_embed, std =0.02) # low std -> less meaningful, high std-> unstable attention
         for block in self.blocks:
             nn.init.constant_(block.adaLN_modulation[-1].weight,0)
-            nn.init.constant_(block.adaLN_modulation[-1].weight,0)
+            nn.init.constant_(block.adaLN_modulation[-1].bias,0)
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight,0)
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias,0)
         nn.init.constant_(self.final_layer.linear.weight,0)
@@ -252,23 +252,6 @@ class SmallREG(nn.Module):
 
         return x
     
-# test
-# model = SmallREG(
-#         input_size=32,
-#         patch_size=2,       
-#         hidden_size=384,   
-#         depth=28,          
-#         num_heads=12,
-#         num_classes=10
-#     ).to(device)
-
-# dummy_x = torch.randn(4, 3, 32, 32).to(device) # Batch 4, RGB, 32x32
-# dummy_t = torch.rand(4).to(device)             # Random timesteps (0~1)
-# dummy_y = torch.randint(0, 10, (4,)).to(device) # Random labels
-
-# output = model(dummy_x, dummy_t, dummy_y)
-# print(output.shape) # torch.Size([4, 3, 32, 32])
-
 
 
 

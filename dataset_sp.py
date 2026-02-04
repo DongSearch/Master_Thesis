@@ -7,6 +7,7 @@ from torchvision.transforms import ToPILImage
 from tqdm import tqdm
 
 
+
 def train_val_pre_processing(data_path, batch_size=128, val_ratio=0.1):
     
     train_transforms = transforms.Compose([
@@ -64,35 +65,3 @@ def test_pre_processing(data_path, batch_size=128):
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     return test_loader
-
-
-# #### test
-# train_loader, val_loader = train_val_pre_processing(
-#     data_path="./data/cifar10_images/train",
-#     batch_size=64,
-#     val_ratio=0.1
-# )
-
-# x, y = next(iter(train_loader))
-# print("train_batch:", x.shape, y.shape)
-# print('range:',x.min().item(), x.max().item())
-
-#  just download 
-# def export_cifar10(split, base_path):
-#     dataset = CIFAR10(
-#         root="./data",
-#         train=(split == "train"),
-#         download=True
-#     )
-
-#     classes = dataset.classes
-
-#     for i, (img, label) in enumerate(dataset):
-#         class_dir = os.path.join(base_path, split, classes[label])
-#         os.makedirs(class_dir, exist_ok=True)
-
-#         img.save(os.path.join(class_dir, f"{i}.png"))
-
-
-# export_cifar10("train", "./data/cifar10_images")
-# export_cifar10("test", "./data/cifar10_images")

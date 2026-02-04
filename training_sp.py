@@ -6,11 +6,13 @@ from tqdm import tqdm
 import torch
 from sit_sp import SmallREG
 from torch.utils.data import DataLoader, TensorDataset
+import wandb
+import time
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 class Diffusion:
-    def __init__(self, T=1000, beta_start=1e-4, beta_end=0.02):
+    def __init__(self, T=1000, beta_start=1e-4, beta_end=0.02,num_classes=10):
         self.T = T
         self.beta = torch.linspace(beta_start, beta_end, T).to(device)
         self.alpha = 1. - self.beta
@@ -33,13 +35,27 @@ class Diffusion:
     
     def sample(self,model,batch_size,labels,cfg_scale=3.0):
         model.eval()
+        start_time = time.time()
+
         with torch.no_grad():
             x = torch.randn((batch_size,3,32,32)).to(device) # random noise
+            # null label generation for CFG
+            null_labels = torch.full_like(labels,self.num_classes).to(device)
             # T : 999 -> 1
             for i in tqdm(reversed(range(1,self.T)), position=0):
                 t = (torch.ones(batch_size)*i).long().to(device)
 
-                predicted_noise = model(x,t,labels)
+                #CFG
+                combined_x = torch.cat([x,x],dim=0)
+                combined_t = torch.cat([t,t],dim=0)
+                combined_y = torch.cat([labels, null_labels],dim=0)
+
+                # model prediciton
+                model_out = model(combined_x,combined_t,combined_y)
+                # seperation consequence
+                eps_cond, eps_uncond = torch.chunk(model_out,2,dim=0)
+                predicted_noise = eps_uncond + cfg_scale*(eps_cond - eps_uncond)
+
                 alpha = self.alpha[t][:, None,None,None]
                 alpha_bar = self.alpha_bar[t][:, None,None,None]
                 beta = self.beta[t][:, None,None,None]
@@ -50,13 +66,31 @@ class Diffusion:
                 else :
                     noise = torch.zeros_like(x)
 
-        x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_bar))) * predicted_noise) + torch.sqrt(beta) * noise
+                x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_bar))) * predicted_noise) + torch.sqrt(beta) * noise
+        # time measurement
+        end_time = time.time()
+        total_time = end_time - start_time
+        
+        print(f"Total sampling time for {batch_size} images: {total_time:.2f} sec")
+        print(f"Speed: {batch_size / total_time:.2f} images/sec")
+
         model.train()
         # [-1, 1] -> [0, 1]로 변환하여 리턴
         x = (x.clamp(-1, 1) + 1) / 2
-        return x
+        return x, total_time
 
 def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4):
+    # intialization wandb
+    wandb.init(project="REG-CIFAR10", mode = "offline",
+               config={
+                        "epochs" : epochs,
+                        "batch_size" : batch_size,
+                        "lr" : lr,
+                        "architecture" : "SmallREG"
+                    }
+            )
+
+
     train_loader, val_loader = dt.train_val_pre_processing(data_path,batch_size=batch_size)
     opt = optim.AdamW(model.parameters(),lr=lr)
     criterion = nn.MSELoss()
@@ -64,7 +98,8 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4):
 
     for epoch in range(epochs):
         pbar = tqdm(train_loader,desc=f"Epoch {epoch+1}/{epochs}")
-        avg_loss = 0
+        avg_train_loss = 0
+        epoch_loss = 0
 
         for i, (imgs,lbs) in enumerate(pbar):
             imgs = imgs.to(device)
@@ -78,102 +113,33 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4):
             opt.zero_grad()
             loss.backward()
             opt.step()
-            avg_loss += loss.item()
+            epoch_loss += loss.item()
             pbar.set_postfix(MSE=loss.item())
+            wandb.log({"batch_mse":loss.item()})
+        
+        avg_train_loss = epoch_loss / len(train_loader)
 
-        print(f"Epoch {epoch+1} Average Loss: {avg_loss / len(train_loader):.4f}")
+        model.eval()
+        val_epoch_loss = 0
+        with torch.no_grad():
+            for v_imgs, v_lbs in val_loader :
+                v_imgs, v_lbs = v_imgs.to(device), v_lbs.to(device)
+                v_t = torch.randint(0, diffusion.T, (v_imgs.shape[0],), device=device)
+                v_xt, v_noise = diffusion.noise_images(v_imgs,v_t)
+                v_pred = model(v_xt, v_t,v_lbs)
+                val_loss = criterion(v_pred, v_noise)
+                val_epoch_loss += val_loss.item()
+
+        avg_val_loss = val_epoch_loss / len(val_loader)
+        print(f"Epoch {epoch+1}: Train MSE: {avg_train_loss:.4f}, Val MSE: {avg_val_loss:.4f}")
+        wandb.log({"epoch": epoch + 1, "train_mse": avg_train_loss, "val_mse": avg_val_loss})
 
         if (epoch + 1) % 10 == 0 :
+            test_labels = torch.arange(0,10).to(device)
+            samples, speed = diffusion.sample(model,10,test_labels)
+            images = [wandb.Image(img) for img in samples]
+            wandb.log({"sampled_images": images, "sampling_speed_sec": speed})
+
             torch.save(model.state_dict(), f"reg_cifar10_ep{epoch+1}.pth")
 
-
-
-
-
-# def get_dummy_loader(batch_size=4):
-#     # CIFAR10 크기: (Batch, 3, 32, 32)
-#     imgs = torch.randn(16, 3, 32, 32) 
-#     labels = torch.randint(0, 10, (16,))
-#     dataset = TensorDataset(imgs, labels)
-#     return DataLoader(dataset, batch_size=batch_size)
-
-# def test_pipeline():
-#     # 1. 설정 (CPU 모드)
-#     device = "cpu"
-#     print(f"Testing on {device}...")
-    
-#     # 2. 모델 초기화
-#     model = SmallREG(
-#         input_size=32, patch_size=2, in_channels=3, 
-#         hidden_size=64, depth=4, num_heads=4, num_classes=10 # 테스트용으로 작게 축소
-#     ).to(device)
-  
-#     diffusion = Diffusion(T=10) # T를 작게 설정
-#     optimizer = optim.AdamW(model.parameters(), lr=1e-3)
-#     criterion = nn.MSELoss()
-
-#     # 3. 데이터 로드
-#     train_loader = get_dummy_loader(batch_size=4)
-
-#     # 4. 학습 루프 (1 Epoch만)
-#     model.train()
-#     for i, (imgs, lbs) in enumerate(train_loader):
-#         imgs, lbs = imgs.to(device), lbs.to(device)
-        
-#         t = torch.randint(0, diffusion.T, (imgs.shape[0],), device=device).long()
-#         x_t, noise = diffusion.noise_images(imgs, t)
-        
-#         # Forward
-#         predicted_noise = model(x_t, t, lbs)
-        
-#         # Loss Check
-#         # 모델 출력이 (B, 6, H, W)라면 여기서 에러 발생함. (B, 3, H, W)여야 함.
-#         if predicted_noise.shape != noise.shape:
-#             print(f"❌ Shape Mismatch! Pred: {predicted_noise.shape}, Target: {noise.shape}")
-#             print("Tip: sit_sp.py의 self.out_channels = in_channels * 2 를 * 1로 수정하세요.")
-#             break
-            
-#         loss = criterion(predicted_noise, noise)
-        
-#         # Backward
-#         optimizer.zero_grad()
-#         loss.backward()
-#         optimizer.step()
-        
-#         print(f"Batch {i}: Loss {loss.item():.4f} (Pass ✅)")
-
-# if __name__ == "__main__":
-#     test_pipeline()
-
-
-
-
-def test_sampling_cpu():
-    # 1. 모델 준비 (작게 축소)
-    model = SmallREG(
-        input_size=32, patch_size=2, in_channels=3, 
-        hidden_size=64, depth=2, num_heads=4, num_classes=10
-    ).to(device)
-    
-    # ★ 중요: sit_sp.py를 수정하지 않았다면 여기서 강제 수정 (Shape 맞추기용)
-  # 2. Diffusion 준비 (빠른 테스트를 위해 T=10으로 설정)
-  
-    diffusion = Diffusion(T=10)
-
-    # 3. 더미 데이터
-    batch_size = 2
-    dummy_labels = torch.randint(0, 10, (batch_size,)).to(device)
-
-    # 4. 샘플링 실행
-    try:
-        generated_images = diffusion.sample(model, batch_size, dummy_labels)
-        print("\n✅ Sampling Success!")
-        print(f"Output Shape: {generated_images.shape}") # (2, 3, 32, 32)
-        print(f"Output Range: [{generated_images.min():.4f}, {generated_images.max():.4f}] (Should be 0~1)")
-    except Exception as e:
-        print(f"\n❌ Sampling Failed: {e}")
-        import traceback
-        traceback.print_exc()
-
-if __name__ == "__main__":
-    test_sampling_cpu()
+    wandb.finish()
