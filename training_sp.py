@@ -8,11 +8,16 @@ from sit_sp import SmallREG
 from torch.utils.data import DataLoader, TensorDataset
 import wandb
 import time
+import os
+import argparse
+#임시
+from torch.utils.data import Subset
+
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 class Diffusion:
-    def __init__(self, T=1000, beta_start=1e-4, beta_end=0.02,num_classes=10):
+    def __init__(self, T=5, beta_start=1e-4, beta_end=0.02,num_classes=10):
         self.T = T
         self.beta = torch.linspace(beta_start, beta_end, T).to(device)
         self.alpha = 1. - self.beta
@@ -75,11 +80,10 @@ class Diffusion:
         print(f"Speed: {batch_size / total_time:.2f} images/sec")
 
         model.train()
-        # [-1, 1] -> [0, 1]로 변환하여 리턴
         x = (x.clamp(-1, 1) + 1) / 2
         return x, total_time
 
-def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4):
+def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume_path = None, save_dir='checkpoints'):
     # intialization wandb
     wandb.init(project="REG-CIFAR10", mode = "offline",
                config={
@@ -89,14 +93,42 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4):
                         "architecture" : "SmallREG"
                     }
             )
+    os.makedirs(save_dir, exist_ok=True)
 
 
-    train_loader, val_loader = dt.train_val_pre_processing(data_path,batch_size=batch_size)
+    train_loader = dt.train_pre_processing(data_path,batch_size=batch_size)
+    val_loader = dt.test_pre_processing(data_path,batch_size)
+
+
+    #임시
+    mini_dataset = Subset(train_loader.dataset, range(8)) 
+    train_loader = DataLoader(mini_dataset, batch_size=batch_size, shuffle=True)
+    
+    # Validation도 마찬가지로 8장만
+    val_loader = DataLoader(Subset(val_loader.dataset, range(8)), batch_size=batch_size)
+
+
+
+
+
+
     opt = optim.AdamW(model.parameters(),lr=lr)
     criterion = nn.MSELoss()
-    model.train()
 
-    for epoch in range(epochs):
+    start_epoch = 0
+    # before start, it checks resume_file
+    if resume_path is not None and os.path.exists(resume_path):
+        print(f"resuming training from {resume_path}")
+        checkpoint = torch.load(resume_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        opt.load_state_dict(checkpoint['optimizer_state_dict'])
+        start_epoch = checkpoint['epoch'] + 1
+        print(f"loaded check point! resuming from epoch{start_epoch + 1}")
+    else :
+        print("starting training from scratch")
+
+    model.train()
+    for epoch in range(start_epoch,epochs):
         pbar = tqdm(train_loader,desc=f"Epoch {epoch+1}/{epochs}")
         avg_train_loss = 0
         epoch_loss = 0
@@ -140,6 +172,14 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4):
             images = [wandb.Image(img) for img in samples]
             wandb.log({"sampled_images": images, "sampling_speed_sec": speed})
 
-            torch.save(model.state_dict(), f"reg_cifar10_ep{epoch+1}.pth")
+            checkpoint = {
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': opt.state_dict(), 
+                'loss': avg_train_loss,
+            }
+            save_path = os.path.join(save_dir, f"reg_cifar10_ep{epoch+1}.pth")
+            torch.save(checkpoint, save_path)
+            print(f"checkpoint saved to {save_path}")
 
     wandb.finish()
