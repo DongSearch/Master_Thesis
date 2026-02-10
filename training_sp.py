@@ -17,11 +17,12 @@ from torch.utils.data import Subset
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 class Diffusion:
-    def __init__(self, T=5, beta_start=1e-4, beta_end=0.02,num_classes=10):
+    def __init__(self, T=1000, beta_start=1e-4, beta_end=0.02,num_classes=10):
         self.T = T
         self.beta = torch.linspace(beta_start, beta_end, T).to(device)
         self.alpha = 1. - self.beta
         self.alpha_bar = torch.cumprod(self.alpha,dim=0) # cumulative production of alpha
+        self.num_classes= num_classes
 
     def noise_images(self,x,t):
         """
@@ -98,19 +99,6 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
 
     train_loader = dt.train_pre_processing(data_path,batch_size=batch_size)
     val_loader = dt.test_pre_processing(data_path,batch_size)
-
-
-    #임시
-    mini_dataset = Subset(train_loader.dataset, range(8)) 
-    train_loader = DataLoader(mini_dataset, batch_size=batch_size, shuffle=True)
-    
-    # Validation도 마찬가지로 8장만
-    val_loader = DataLoader(Subset(val_loader.dataset, range(8)), batch_size=batch_size)
-
-
-
-
-
 
     opt = optim.AdamW(model.parameters(),lr=lr)
     criterion = nn.MSELoss()

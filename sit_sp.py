@@ -238,8 +238,10 @@ class SmallREG(nn.Module):
                 # low block
                 out = block(x,c)
                 x = high_noise_mask * out + (1- high_noise_mask) * x
+                print("low")
 
             else :
+                print("high")
                 out = block(x,c)
                 x = low_noise_mask * out + (1 - low_noise_mask) * x
 
