@@ -67,7 +67,7 @@ class Diffusion:
                 beta = self.beta[t][:, None,None,None]
                 # if it is rastt step, no add noise, otherwise put random noise to avoid getting distorted by substration noise
 
-                if i > 1 :
+                if i > 0 :
                     noise = torch.randn_like(x)
                 else :
                     noise = torch.zeros_like(x)
