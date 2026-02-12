@@ -145,7 +145,7 @@ class SmallREG(nn.Module):
                  patch_size=2,
                  in_channels=3,
                  hidden_size=384,
-                 depth=28,
+                 depth=14,
                  num_heads = 12,
                  num_classes=10,
                  class_dropout_prob=0.1,
@@ -223,27 +223,31 @@ class SmallREG(nn.Module):
         x = torch.cat([y_emb,x],dim=1) #(N,L+1,D)
         c = t_emb + y_emb.squeeze(1)
 
-        split_idx = self.depth //2
+        for block in self.blocks:
+            x = block(x,c)
 
-        threshold = 0.5
-        # t [0,1000]
-        t_norm = t / 1000.0 if torch.max(t) > 1.0 else t
 
-        high_noise_mask = (t_norm > threshold).float().view(-1,1,1)
-        low_noise_mask = (t_norm <= threshold).float().view(-1,1,1)
+        # split_idx = self.depth //2
 
-        for i, block in enumerate(self.blocks):
-            out = block(x,c)
-            if i < split_idx:
-                # low block
-                out = block(x,c)
-                x = high_noise_mask * out + (1- high_noise_mask) * x
+        # threshold = 0.5
+        # # t [0,1000]
+        # t_norm = t / 1000.0 if torch.max(t) > 1.0 else t
+
+        # high_noise_mask = (t_norm > threshold).float().view(-1,1,1)
+        # low_noise_mask = (t_norm <= threshold).float().view(-1,1,1)
+
+        # for i, block in enumerate(self.blocks):
+        #     out = block(x,c)
+        #     if i < split_idx:
+        #         # low block
+        #         out = block(x,c)
+        #         x = high_noise_mask * out + (1- high_noise_mask) * x
            
 
-            else :
+        #     else :
             
-                out = block(x,c)
-                x = low_noise_mask * out + (1 - low_noise_mask) * x
+        #         out = block(x,c)
+        #         x = low_noise_mask * out + (1 - low_noise_mask) * x
 
         # final layer
         x =  x[:,1:,:] # (N,L,D) - remove class token

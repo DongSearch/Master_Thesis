@@ -10,8 +10,16 @@ import wandb
 import time
 import os
 import argparse
-#임시
-from torch.utils.data import Subset
+import matplotlib.pyplot as plt
+import torchvision.utils as vutils
+
+try:
+    from torchmetrics.image.fid import FrechetInceptionDistance
+    HAS_FID = True
+except ImportError:
+    HAS_FID = False
+    print("Warning: torchmetrics not installed. FID will be skipped.")
+
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -19,7 +27,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 class Diffusion:
     def __init__(self, T=1000, beta_start=1e-4, beta_end=0.02,num_classes=10):
         self.T = T
-        self.beta = torch.linspace(beta_start, beta_end, T).to(device)
+        self.beta = torch.linspace(beta_start, beta_end, T).to(device) # noise get harder as step goes
         self.alpha = 1. - self.beta
         self.alpha_bar = torch.cumprod(self.alpha,dim=0) # cumulative production of alpha
         self.num_classes= num_classes
@@ -48,7 +56,7 @@ class Diffusion:
             # null label generation for CFG
             null_labels = torch.full_like(labels,self.num_classes).to(device)
             # T : 999 -> 1
-            for i in tqdm(reversed(range(1,self.T)), position=0):
+            for i in tqdm(reversed(range(0,self.T)), position=0):
                 t = (torch.ones(batch_size)*i).long().to(device)
 
                 #CFG
@@ -103,6 +111,9 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
     opt = optim.AdamW(model.parameters(),lr=lr)
     criterion = nn.MSELoss()
 
+    fid = FrechetInceptionDistance(feature=64).to(device) if HAS_FID else None
+
+
     start_epoch = 0
     # before start, it checks resume_file
     if resume_path is not None and os.path.exists(resume_path):
@@ -154,11 +165,11 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
         print(f"Epoch {epoch+1}: Train MSE: {avg_train_loss:.4f}, Val MSE: {avg_val_loss:.4f}")
         wandb.log({"epoch": epoch + 1, "train_mse": avg_train_loss, "val_mse": avg_val_loss})
 
-        if (epoch + 1) % 10 == 0 :
-            test_labels = torch.arange(0,10).to(device)
-            samples, speed = diffusion.sample(model,10,test_labels)
-            images = [wandb.Image(img) for img in samples]
-            wandb.log({"sampled_images": images, "sampling_speed_sec": speed})
+        if (epoch + 1) % 5 == 0 :
+            # test_labels = torch.arange(0,10).to(device)
+            # samples, speed = diffusion.sample(model,10,test_labels)
+            # images = [wandb.Image(img) for img in samples]
+            # wandb.log({"sampled_images": images, "sampling_speed_sec": speed})
 
             checkpoint = {
                 'epoch': epoch,
@@ -169,5 +180,49 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
             save_path = os.path.join(save_dir, f"reg_cifar10_ep{epoch+1}.pth")
             torch.save(checkpoint, save_path)
             print(f"checkpoint saved to {save_path}")
+
+            ############################for colab###########################
+        # image generation
+        print("Generating samples for FID and Visualization...")
+        
+        # 1. FID 계산 (Reset -> Add Real -> Add Fake -> Compute)
+        if HAS_FID:
+            fid.reset() 
+            fid_real_limit_batches = 10 
+            with torch.no_grad():
+                for i, (real_imgs, _) in enumerate(val_loader):
+                    if i >= fid_real_limit_batches: break
+                    real_imgs = real_imgs.to(device)
+                    # [-1, 1] -> [0, 1] -> [0, 255] uint8
+                    real_imgs = (real_imgs.clamp(-1, 1) + 1) / 2
+                    real_imgs = (real_imgs * 255).to(torch.uint8)
+                    fid.update(real_imgs, real=True)
+            
+            # Fake Images 추가
+            num_fid_samples = 1000 
+            fake_batches = num_fid_samples // batch_size
+            
+            with torch.no_grad():
+                for _ in tqdm(range(fake_batches), desc="FID generation"):
+                    labels = torch.randint(0, diffusion.num_classes, (batch_size,), device=device)
+                    fake_imgs, _ = diffusion.sample(model, batch_size, labels)
+                    fake_imgs = (fake_imgs * 255).to(torch.uint8)
+                    fid.update(fake_imgs, real=False)
+
+            fid_score = fid.compute().item()
+            print(f"Epoch {epoch+1} FID: {fid_score:.4f}")
+            wandb.log({"fid": fid_score})
+
+        test_labels = torch.arange(0, 5).to(device)  
+        samples, _ = diffusion.sample(model, 5, test_labels)
+
+        grid = vutils.make_grid(samples, nrow=5)
+        grid = grid.permute(1, 2, 0).cpu().numpy()
+
+        plt.figure(figsize=(12, 3))
+        plt.imshow(grid)
+        plt.axis("off")
+        plt.title(f"Epoch {epoch+1} Samples")
+        plt.show() # Colab에서 이미지 출력
 
     wandb.finish()
