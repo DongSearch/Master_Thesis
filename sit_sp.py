@@ -145,7 +145,7 @@ class SmallREG(nn.Module):
                  patch_size=2,
                  in_channels=3,
                  hidden_size=384,
-                 depth=14,
+                 depth=8,
                  num_heads = 12,
                  num_classes=10,
                  class_dropout_prob=0.1,
@@ -154,7 +154,6 @@ class SmallREG(nn.Module):
         self.input_size = input_size
         self.patch_size = patch_size
         self.in_channels = in_channels
-        self.out_channels = in_channels * 2
         self.hidden_size = hidden_size
         self.depth = depth
         self.num_heads = num_heads
@@ -185,14 +184,15 @@ class SmallREG(nn.Module):
         self.initialize_weights()
 
     def initialize_weights(self):
-        nn.init.normal_(self.pos_embed, std =0.02) # low std -> less meaningful, high std-> unstable attention
+        # nn.init.normal_(self.pos_embed, std =0.02) # low std -> less meaningful, high std-> unstable attention
         for block in self.blocks:
-            nn.init.constant_(block.adaLN_modulation[-1].weight,0)
+            # nn.init.constant_(block.adaLN_modulation[-1].weight,0)
+            nn.init.normal_(block.adaLN_modulation[-1].weight, std=1e-4)
             nn.init.constant_(block.adaLN_modulation[-1].bias,0)
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight,0)
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias,0)
-        nn.init.constant_(self.final_layer.linear.weight,0)
-        nn.init.constant_(self.final_layer.linear.bias,0)
+        # nn.init.constant_(self.final_layer.linear.weight,0)
+        # nn.init.constant_(self.final_layer.linear.bias,0)
 
     def unpatchify(self, x):
         # (N,T, patch_size**2 *C) ->(N,C,H,W)

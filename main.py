@@ -3,15 +3,16 @@ from training_sp import train, Diffusion
 from sit_sp import SmallREG
 import inference_sp
 import torch
-
+import os
 def main():
     parser = argparse.ArgumentParser(description="SmallREG Diffusion Model on CIFAR-10")
-    
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    DATA_PATH = os.path.abspath(os.path.join(BASE_DIR, '../../data/cifar10'))
     # 모드 선택 (필수)
     parser.add_argument('--mode', type=str, required=True, choices=['train', 'inference'], help='Choose mode: train or inference')
     
     # 공통 설정
-    parser.add_argument('--data_path', type=str, default='./data/cifar10', help='Path to dataset')
+    parser.add_argument('--data_path', type=str, default=DATA_PATH, help='Path to dataset')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size')
     
     # Training 관련 설정
@@ -32,7 +33,7 @@ def main():
 
     if args.mode == 'train':
         print(f"🔥 Starting Training on {device}...")
-        model = SmallREG(input_size=32, patch_size=2, in_channels=3, hidden_size=384, depth=28).to(device)
+        model = SmallREG(input_size=32, patch_size=2, in_channels=3, hidden_size=384, depth=10).to(device)
         diffusion = Diffusion(num_classes=10)
         train(
         args.data_path, 

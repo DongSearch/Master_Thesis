@@ -12,6 +12,7 @@ import os
 import argparse
 import matplotlib.pyplot as plt
 import torchvision.utils as vutils
+from torch.cuda.amp import GradScaler, autocast
 
 try:
     from torchmetrics.image.fid import FrechetInceptionDistance
@@ -107,7 +108,7 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
 
     train_loader = dt.train_pre_processing(data_path,batch_size=batch_size)
     val_loader = dt.test_pre_processing(data_path,batch_size)
-
+    scaler = GradScaler()
     opt = optim.AdamW(model.parameters(),lr=lr)
     criterion = nn.MSELoss()
 
@@ -138,12 +139,16 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
             B = imgs.shape[0]
 
             t = torch.randint(0,diffusion.T,(B,), device=device).long()
-            x_t, noise = diffusion.noise_images(imgs,t)# forward diffusion
-            predicted_noise = model(x_t,t,lbs) # prediction
-            loss = criterion(predicted_noise,noise)
+
+            with autocast():
+                x_t, noise = diffusion.noise_images(imgs,t)# forward diffusion
+                predicted_noise = model(x_t,t,lbs) # prediction
+                loss = criterion(predicted_noise,noise)
             opt.zero_grad()
-            loss.backward()
-            opt.step()
+            scaler.scale(loss).backward()
+            scaler.step(opt)
+            scaler.update()
+
             epoch_loss += loss.item()
             pbar.set_postfix(MSE=loss.item())
             wandb.log({"batch_mse":loss.item()})
@@ -156,16 +161,32 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
             for v_imgs, v_lbs in val_loader :
                 v_imgs, v_lbs = v_imgs.to(device), v_lbs.to(device)
                 v_t = torch.randint(0, diffusion.T, (v_imgs.shape[0],), device=device)
-                v_xt, v_noise = diffusion.noise_images(v_imgs,v_t)
-                v_pred = model(v_xt, v_t,v_lbs)
-                val_loss = criterion(v_pred, v_noise)
+                with autocast():
+                    v_xt, v_noise = diffusion.noise_images(v_imgs,v_t)
+                    v_pred = model(v_xt, v_t,v_lbs)
+                    val_loss = criterion(v_pred, v_noise)
                 val_epoch_loss += val_loss.item()
 
         avg_val_loss = val_epoch_loss / len(val_loader)
         print(f"Epoch {epoch+1}: Train MSE: {avg_train_loss:.4f}, Val MSE: {avg_val_loss:.4f}")
         wandb.log({"epoch": epoch + 1, "train_mse": avg_train_loss, "val_mse": avg_val_loss})
+        
+        
+        test_labels = torch.arange(0, 10).to(device)  # 10개 클래스 샘플링
+        samples, _ = diffusion.sample(model, 10, test_labels) # T=1000 고품질
 
-        if (epoch + 1) % 5 == 0 :
+        # 이미지 그리드 생성 및 저장
+        # save_dir 내부에 'samples' 폴더 생성
+        sample_img_dir = os.path.join(save_dir, 'samples')
+        os.makedirs(sample_img_dir, exist_ok=True)
+        
+        grid_save_path = os.path.join(sample_img_dir, f"sample_epoch_{epoch+1}.png")
+        vutils.save_image(samples, grid_save_path, nrow=5)
+        print(f"Sample image saved to {grid_save_path}")
+            
+
+
+        if (epoch + 1) % 10 == 0 :
             # test_labels = torch.arange(0,10).to(device)
             # samples, speed = diffusion.sample(model,10,test_labels)
             # images = [wandb.Image(img) for img in samples]
@@ -180,49 +201,35 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
             save_path = os.path.join(save_dir, f"reg_cifar10_ep{epoch+1}.pth")
             torch.save(checkpoint, save_path)
             print(f"checkpoint saved to {save_path}")
+            print("Generating samples for FID and Visualization...")
 
-            ############################for colab###########################
-        # image generation
-        print("Generating samples for FID and Visualization...")
-        
-        # 1. FID 계산 (Reset -> Add Real -> Add Fake -> Compute)
-        if HAS_FID:
-            fid.reset() 
-            fid_real_limit_batches = 10 
-            with torch.no_grad():
-                for i, (real_imgs, _) in enumerate(val_loader):
-                    if i >= fid_real_limit_batches: break
-                    real_imgs = real_imgs.to(device)
-                    # [-1, 1] -> [0, 1] -> [0, 255] uint8
-                    real_imgs = (real_imgs.clamp(-1, 1) + 1) / 2
-                    real_imgs = (real_imgs * 255).to(torch.uint8)
-                    fid.update(real_imgs, real=True)
+
             
-            # Fake Images 추가
-            num_fid_samples = 1000 
-            fake_batches = num_fid_samples // batch_size
-            
-            with torch.no_grad():
-                for _ in tqdm(range(fake_batches), desc="FID generation"):
-                    labels = torch.randint(0, diffusion.num_classes, (batch_size,), device=device)
-                    fake_imgs, _ = diffusion.sample(model, batch_size, labels)
-                    fake_imgs = (fake_imgs * 255).to(torch.uint8)
-                    fid.update(fake_imgs, real=False)
+            # 1. FID 계산 (Reset -> Add Real -> Add Fake -> Compute)
+            if HAS_FID:
+                fid.reset() 
+                fid_real_limit_batches = 10 
+                with torch.no_grad():
+                    for i, (real_imgs, _) in enumerate(val_loader):
+                        if i >= fid_real_limit_batches: break
+                        real_imgs = real_imgs.to(device)
+                        # [-1, 1] -> [0, 1] -> [0, 255] uint8
+                        real_imgs = (real_imgs.clamp(-1, 1) + 1) / 2
+                        real_imgs = (real_imgs * 255).to(torch.uint8)
+                        fid.update(real_imgs, real=True)
 
-            fid_score = fid.compute().item()
-            print(f"Epoch {epoch+1} FID: {fid_score:.4f}")
-            wandb.log({"fid": fid_score})
+                num_fid_samples = 128
+                fake_batches = num_fid_samples // batch_size
+                with torch.no_grad():
+                    for _ in tqdm(range(fake_batches), desc="FID generation"):
+                        labels = torch.randint(0, diffusion.num_classes, (batch_size,), device=device)
+                        with autocast():
+                            fake_imgs, _ = diffusion.sample(model, batch_size, labels)
+                        fake_imgs = (fake_imgs * 255).to(torch.uint8)
+                        fid.update(fake_imgs, real=False)
 
-        test_labels = torch.arange(0, 5).to(device)  
-        samples, _ = diffusion.sample(model, 5, test_labels)
-
-        grid = vutils.make_grid(samples, nrow=5)
-        grid = grid.permute(1, 2, 0).cpu().numpy()
-
-        plt.figure(figsize=(12, 3))
-        plt.imshow(grid)
-        plt.axis("off")
-        plt.title(f"Epoch {epoch+1} Samples")
-        plt.show() # Colab에서 이미지 출력
+                fid_score = fid.compute().item()
+                print(f"Epoch {epoch+1} FID: {fid_score:.4f}")
+                wandb.log({"fid": fid_score})
 
     wandb.finish()
