@@ -173,7 +173,7 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
         
         
         test_labels = torch.arange(0, 10).to(device)  # 10개 클래스 샘플링
-        samples, _ = diffusion.sample(model, 10, test_labels) # T=1000 고품질
+        samples, _ = diffusion.sample(model, 10, test_labels, cfg_scale=0.0) # T=1000 고품질
 
         # 이미지 그리드 생성 및 저장
         # save_dir 내부에 'samples' 폴더 생성
@@ -205,7 +205,7 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
 
 
             
-            # 1. FID 계산 (Reset -> Add Real -> Add Fake -> Compute)
+            # 1. (Reset -> Add Real -> Add Fake -> Compute)
             if HAS_FID:
                 fid.reset() 
                 fid_real_limit_batches = 10 

@@ -7,7 +7,7 @@ import os
 def main():
     parser = argparse.ArgumentParser(description="SmallREG Diffusion Model on CIFAR-10")
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    DATA_PATH = os.path.abspath(os.path.join(BASE_DIR, '../../data/cifar10'))
+    DATA_PATH = os.path.abspath(os.path.join(BASE_DIR, '../../data/cifar10_images'))
     # 모드 선택 (필수)
     parser.add_argument('--mode', type=str, required=True, choices=['train', 'inference'], help='Choose mode: train or inference')
     
