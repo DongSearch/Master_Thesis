@@ -221,7 +221,7 @@ class SmallREG(nn.Module):
         y_emb = self.y_embedder(y) #(N,D)
         y_emb = y_emb.unsqueeze(1) + self.pos_embed[:, :1, :]
         x = torch.cat([y_emb,x],dim=1) #(N,L+1,D)
-        c = t_emb + y_emb.squeeze(1)
+        c = t_emb
 
         for block in self.blocks:
             x = block(x,c)
