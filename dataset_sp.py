@@ -4,20 +4,36 @@ from torch.utils.data import DataLoader, Subset
 import os
 from torchvision.transforms import ToPILImage
 from tqdm import tqdm
+from torchvision.datasets import MNIST
 
 
 
-def train_pre_processing(data_path, batch_size=128, val_ratio=0.1):
+
+def train_pre_processing(data_path, batch_size=256, val_ratio=0.1):
     
     train_transforms = transforms.Compose([
-        transforms.RandomHorizontalFlip(),
+        # transforms.RandomHorizontalFlip(),
         transforms.ToTensor(), # [0,1]
-        transforms.Normalize((0.5,0.5,0.5),(0.5,0.5,0.5)) # [-1,1]
+        # Cifar10
+        # transforms.Normalize((0.5,0.5,0.5),(0.5,0.5,0.5)) # [-1,1]
+        transforms.Normalize((0.5,),(0.5,)) # MNIST
     ])
 
-    train_dataset = ImageFolder(data_path,transform=train_transforms)
+    # train_dataset = ImageFolder(data_path,transform=train_transforms)
    
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    # train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_dataset = MNIST(
+        root=data_path,
+        train=True,
+        transform=train_transforms,
+        download=True
+        )
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True
+    )
 
 
     return train_loader
@@ -29,12 +45,27 @@ def test_pre_processing(data_path, batch_size=128):
 
     test_transforms = transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize((0.5,0.5,0.5),(0.5,0.5,0.5))
+        transforms.Normalize((0.5,),(0.5,))
     ])
 
 
-    test_dataset = ImageFolder(root=data_path, transform=test_transforms)
+    # test_dataset = ImageFolder(root=data_path, transform=test_transforms)
 
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    # test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+
+    test_dataset = MNIST(
+        root=data_path,
+        train=False,
+        transform=test_transforms,
+        download=True
+    )
+
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False
+    )
+
 
     return test_loader

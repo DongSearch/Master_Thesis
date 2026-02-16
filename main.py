@@ -7,7 +7,7 @@ import os
 def main():
     parser = argparse.ArgumentParser(description="SmallREG Diffusion Model on CIFAR-10")
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    DATA_PATH = os.path.abspath(os.path.join(BASE_DIR, '../../data/cifar10_images'))
+    DATA_PATH = os.path.abspath(os.path.join(BASE_DIR, '../../data/MNIST'))
     # 모드 선택 (필수)
     parser.add_argument('--mode', type=str, required=True, choices=['train', 'inference'], help='Choose mode: train or inference')
     
@@ -33,7 +33,7 @@ def main():
 
     if args.mode == 'train':
         print(f"🔥 Starting Training on {device}...")
-        model = SmallREG(input_size=32, patch_size=2, in_channels=3, hidden_size=384, depth=10).to(device)
+        model = SmallREG(input_size=28, patch_size=2, in_channels=1, hidden_size=384, depth=6, num_heads = 8).to(device)
         diffusion = Diffusion(num_classes=10)
         train(
         args.data_path, 

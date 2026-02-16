@@ -10,7 +10,6 @@ import wandb
 import time
 import os
 import argparse
-import matplotlib.pyplot as plt
 import torchvision.utils as vutils
 from torch.cuda.amp import GradScaler, autocast
 
@@ -53,7 +52,7 @@ class Diffusion:
         start_time = time.time()
 
         with torch.no_grad():
-            x = torch.randn((batch_size,3,32,32)).to(device) # random noise
+            x = torch.randn((batch_size,1,28,28)).to(device) # random noise
             # null label generation for CFG
             null_labels = torch.full_like(labels,self.num_classes).to(device)
             # T : 999 -> 1
@@ -173,7 +172,7 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
         
         
         test_labels = torch.arange(0, 10).to(device)  # 10개 클래스 샘플링
-        samples, _ = diffusion.sample(model, 10, test_labels, cfg_scale=0.0) # T=1000 고품질
+        samples, _ = diffusion.sample(model, 10, test_labels, cfg_scale=2.0) # T=1000 고품질
 
         # 이미지 그리드 생성 및 저장
         # save_dir 내부에 'samples' 폴더 생성
@@ -198,7 +197,7 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
                 'optimizer_state_dict': opt.state_dict(), 
                 'loss': avg_train_loss,
             }
-            save_path = os.path.join(save_dir, f"reg_cifar10_ep{epoch+1}.pth")
+            save_path = os.path.join(save_dir, f"reg_mnist_ep{epoch+1}.pth")
             torch.save(checkpoint, save_path)
             print(f"checkpoint saved to {save_path}")
             print("Generating samples for FID and Visualization...")
@@ -207,29 +206,66 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
             
             # 1. (Reset -> Add Real -> Add Fake -> Compute)
             if HAS_FID:
-                fid.reset() 
-                fid_real_limit_batches = 10 
+                fid.reset()
+                fid_real_limit_batches = 10
+
                 with torch.no_grad():
                     for i, (real_imgs, _) in enumerate(val_loader):
-                        if i >= fid_real_limit_batches: break
+                        if i >= fid_real_limit_batches:
+                            break
+
                         real_imgs = real_imgs.to(device)
-                        # [-1, 1] -> [0, 1] -> [0, 255] uint8
+
+                        # [-1, 1] -> [0, 1]
                         real_imgs = (real_imgs.clamp(-1, 1) + 1) / 2
+
+                        # 1채널 -> 3채널
+                        real_imgs = real_imgs.repeat(1, 3, 1, 1)
+
+                        # 28x28 -> 299x299
+                        real_imgs = torch.nn.functional.interpolate(
+                            real_imgs,
+                            size=(299, 299),
+                            mode="bilinear",
+                            align_corners=False
+                        )
+
+                        # [0,1] -> [0,255] uint8
                         real_imgs = (real_imgs * 255).to(torch.uint8)
+
                         fid.update(real_imgs, real=True)
 
                 num_fid_samples = 128
                 fake_batches = num_fid_samples // batch_size
+
                 with torch.no_grad():
                     for _ in tqdm(range(fake_batches), desc="FID generation"):
-                        labels = torch.randint(0, diffusion.num_classes, (batch_size,), device=device)
+                        labels = torch.randint(
+                            0, diffusion.num_classes, (batch_size,), device=device
+                        )
+
                         with autocast():
                             fake_imgs, _ = diffusion.sample(model, batch_size, labels)
+
+                        # 이미 diffusion.sample에서 [0,1] 범위임
+
+                        # 1채널 -> 3채널
+                        fake_imgs = fake_imgs.repeat(1, 3, 1, 1)
+
+                        # 28x28 -> 299x299
+                        fake_imgs = torch.nn.functional.interpolate(
+                            fake_imgs,
+                            size=(299, 299),
+                            mode="bilinear",
+                            align_corners=False
+                        )
+
+                        # [0,1] -> [0,255] uint8
                         fake_imgs = (fake_imgs * 255).to(torch.uint8)
+
                         fid.update(fake_imgs, real=False)
 
                 fid_score = fid.compute().item()
                 print(f"Epoch {epoch+1} FID: {fid_score:.4f}")
                 wandb.log({"fid": fid_score})
-
     wandb.finish()

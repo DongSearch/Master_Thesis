@@ -141,7 +141,7 @@ x(image) -> patchfy ->token + class toekn + posistion embed
 """
 class SmallREG(nn.Module):
     def __init__(self, 
-                 input_size=32,
+                 input_size=28,
                  patch_size=2,
                  in_channels=3,
                  hidden_size=384,
@@ -215,7 +215,7 @@ class SmallREG(nn.Module):
         # learn both conditional(force to move) and unconditional(natural way)
         # objective is to grow the conditional direction keeping as much as natural way
         if self.training and self.class_dropout_prob > 0 :
-            keep_mask = torch.rand(y.shape, device=y.device) > self. class_dropout_prob
+            keep_mask = torch.rand(y.shape, device=y.device) > self.class_dropout_prob
             y = torch.where(keep_mask,y, torch.tensor(self.num_classes, device=y.device))
 
         y_emb = self.y_embedder(y) #(N,D)
@@ -233,24 +233,35 @@ class SmallREG(nn.Module):
         # # t [0,1000]
         # t_norm = t / 1000.0 if torch.max(t) > 1.0 else t
 
-        # high_noise_mask = (t_norm > threshold).float().view(-1,1,1)
-        # low_noise_mask = (t_norm <= threshold).float().view(-1,1,1)
+        # high_noise_indices = (t_norm > threshold).nonzero().squeeze(-1)
+        # low_noise_indices = (t_norm <= threshold).nonzero().squeeze(-1)
 
-        # for i, block in enumerate(self.blocks):
-        #     out = block(x,c)
-        #     if i < split_idx:
-        #         # low block
-        #         out = block(x,c)
-        #         x = high_noise_mask * out + (1- high_noise_mask) * x
-           
+        # concat_high_low_block = torch.zeros_like(x)
 
-        #     else :
-            
-        #         out = block(x,c)
-        #         x = low_noise_mask * out + (1 - low_noise_mask) * x
+        # if len(high_noise_indices) > 0 :
+        #     x_high = x[high_noise_indices]
+        #     c_high = c[high_noise_indices]
+
+        #     for block in self.blocks[:split_idx]:
+        #         x_high = block(x_high,c_high)
+
+        #     concat_high_low_block[high_noise_indices] = x_high 
+
+        # if len(low_noise_indices) > 0 :
+        #     x_low = x[low_noise_indices]
+        #     c_low = c[low_noise_indices]
+
+        #     for block in self.blocks[split_idx:]:
+        #         x_low = block(x_low,c_low)
+
+        #     concat_high_low_block[low_noise_indices] = x_low   
+
+    
+
 
         # final layer
-        x =  x[:,1:,:] # (N,L,D) - remove class token
+        # x = concat_high_low_block[:,1:,:] # (N,L,D) - remove class token
+        x = x[:,1:,:]
         x = self.final_layer(x,c) # (N,L,P*P*C)
 
         # unpatchfiy
