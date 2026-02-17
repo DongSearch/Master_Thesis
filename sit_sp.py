@@ -227,8 +227,8 @@ class SmallREG(nn.Module):
         x = torch.cat([y_emb,x],dim=1) #(N,L+1,D)
         c = t_emb
 
-        for block in self.blocks:
-            x = block(x,c)
+        # for block in self.blocks:
+        #     x = block(x,c)
 
 
         split_idx = int(self.depth * self.high_low_split)
@@ -240,22 +240,23 @@ class SmallREG(nn.Module):
         high_noise_indices = (t_norm > threshold).nonzero().squeeze(-1)
         low_noise_indices = (t_norm <= threshold).nonzero().squeeze(-1)
 
-        concat_high_low_block = torch.zeros_like(x)
-
+        concat_high_low_block = x.clone()
+        
+        #global semantic (high_noise / low_frequency)
         if len(high_noise_indices) > 0 :
             x_high = x[high_noise_indices]
             c_high = c[high_noise_indices]
 
-            for block in self.blocks[:split_idx]:
+            for block in self.blocks[ split_idx:]:
                 x_high = block(x_high,c_high)
 
             concat_high_low_block[high_noise_indices] = x_high 
-
+        #local detail (low_noise/high_freqeuncy)
         if len(low_noise_indices) > 0 :
             x_low = x[low_noise_indices]
             c_low = c[low_noise_indices]
 
-            for block in self.blocks[split_idx:]:
+            for block in self.blocks[:split_idx ]:
                 x_low = block(x_low,c_low)
 
             concat_high_low_block[low_noise_indices] = x_low   
