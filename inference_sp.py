@@ -63,6 +63,6 @@ def run_inference(args):
     save_path = "results/generated_stats_sample.png"
     save_image(grid, save_path)
 
-    print(f"💾 Saved all {num_samples} generated images to {save_path}")
-    save_image(samples, "results/generated_sample.png", nrow=4,normalize=False)
-    print("Saved generated images to results/generated_sample.png")
+    # print(f"💾 Saved all {num_samples} generated images to {save_path}")
+    # save_image(samples, "results/generated_sample.png", nrow=4,normalize=False)
+    # print("Saved generated images to results/generated_sample.png")

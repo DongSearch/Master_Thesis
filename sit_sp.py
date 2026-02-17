@@ -141,7 +141,7 @@ x(image) -> patchfy ->token + class toekn + posistion embed
 """
 class SmallREG(nn.Module):
     def __init__(self, 
-                 input_size=28,
+                 input_size=32,
                  patch_size=2,
                  in_channels=3,
                  hidden_size=384,
@@ -149,6 +149,8 @@ class SmallREG(nn.Module):
                  num_heads = 12,
                  num_classes=10,
                  class_dropout_prob=0.1,
+                 high_low_split = 0.5,
+                 split_threshold = 0.5
                  ):
         super().__init__()
         self.input_size = input_size
@@ -159,6 +161,8 @@ class SmallREG(nn.Module):
         self.num_heads = num_heads
         self.num_classes = num_classes
         self.class_dropout_prob = class_dropout_prob
+        self.high_low_split = high_low_split
+        self.split_threshold = split_threshold
         
         #1. Patch Embedder(32*32 ->16*16 = 256 patches)
         self.x_embedder = PatchEmbed(input_size, patch_size, in_channels, hidden_size)
@@ -227,41 +231,41 @@ class SmallREG(nn.Module):
             x = block(x,c)
 
 
-        # split_idx = self.depth //2
+        split_idx = int(self.depth * self.high_low_split)
 
-        # threshold = 0.5
-        # # t [0,1000]
-        # t_norm = t / 1000.0 if torch.max(t) > 1.0 else t
+        threshold = self.split_threshold
+        # t [0,1000]
+        t_norm = t / 1000.0 if torch.max(t) > 1.0 else t
 
-        # high_noise_indices = (t_norm > threshold).nonzero().squeeze(-1)
-        # low_noise_indices = (t_norm <= threshold).nonzero().squeeze(-1)
+        high_noise_indices = (t_norm > threshold).nonzero().squeeze(-1)
+        low_noise_indices = (t_norm <= threshold).nonzero().squeeze(-1)
 
-        # concat_high_low_block = torch.zeros_like(x)
+        concat_high_low_block = torch.zeros_like(x)
 
-        # if len(high_noise_indices) > 0 :
-        #     x_high = x[high_noise_indices]
-        #     c_high = c[high_noise_indices]
+        if len(high_noise_indices) > 0 :
+            x_high = x[high_noise_indices]
+            c_high = c[high_noise_indices]
 
-        #     for block in self.blocks[:split_idx]:
-        #         x_high = block(x_high,c_high)
+            for block in self.blocks[:split_idx]:
+                x_high = block(x_high,c_high)
 
-        #     concat_high_low_block[high_noise_indices] = x_high 
+            concat_high_low_block[high_noise_indices] = x_high 
 
-        # if len(low_noise_indices) > 0 :
-        #     x_low = x[low_noise_indices]
-        #     c_low = c[low_noise_indices]
+        if len(low_noise_indices) > 0 :
+            x_low = x[low_noise_indices]
+            c_low = c[low_noise_indices]
 
-        #     for block in self.blocks[split_idx:]:
-        #         x_low = block(x_low,c_low)
+            for block in self.blocks[split_idx:]:
+                x_low = block(x_low,c_low)
 
-        #     concat_high_low_block[low_noise_indices] = x_low   
+            concat_high_low_block[low_noise_indices] = x_low   
 
     
 
 
         # final layer
-        # x = concat_high_low_block[:,1:,:] # (N,L,D) - remove class token
-        x = x[:,1:,:]
+        x = concat_high_low_block[:,1:,:] # (N,L,D) - remove class token
+        # x = x[:,1:,:]
         x = self.final_layer(x,c) # (N,L,P*P*C)
 
         # unpatchfiy

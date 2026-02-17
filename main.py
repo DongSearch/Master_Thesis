@@ -7,13 +7,17 @@ import os
 def main():
     parser = argparse.ArgumentParser(description="SmallREG Diffusion Model on CIFAR-10")
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    DATA_PATH = os.path.abspath(os.path.join(BASE_DIR, '../../data/MNIST'))
+    DATA_PATH = os.path.abspath(os.path.join(BASE_DIR, '../../data/cifar10_images'))
     # 모드 선택 (필수)
     parser.add_argument('--mode', type=str, required=True, choices=['train', 'inference'], help='Choose mode: train or inference')
     
     # 공통 설정
     parser.add_argument('--data_path', type=str, default=DATA_PATH, help='Path to dataset')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size')
+    parser.add_argument('--data_type', type=str, default='cifar_10', help='data type')
+    parser.add_argument('--high_block_proportion', type=float, default=0.5, help='data type')
+    parser.add_argument('--threshold', type=float, default=0.5, help='threshold')
+
     
     # Training 관련 설정
     parser.add_argument('--epochs', type=int, default=100, help='Number of epochs')
@@ -30,11 +34,16 @@ def main():
     args = parser.parse_args()
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    if args.data_type == "cifar_10":
+        C,H,W,N,D,NH = 3,32,32,10,14,12
+    elif args.data_type == "mnist":
+        C,H,W,N,D,NH = 1,28,28,10,6,8
 
     if args.mode == 'train':
         print(f"🔥 Starting Training on {device}...")
-        model = SmallREG(input_size=28, patch_size=2, in_channels=1, hidden_size=384, depth=6, num_heads = 8).to(device)
-        diffusion = Diffusion(num_classes=10)
+        model = SmallREG(input_size=H, patch_size=2, in_channels=C, hidden_size=384, depth=D, num_heads = NH,
+                         high_low_split=args.high_block_proportion, split_threshold= args.threshold).to(device)
+        diffusion = Diffusion(num_classes=N)
         train(
         args.data_path, 
         model, 
@@ -43,7 +52,11 @@ def main():
         args.batch_size, 
         args.lr, 
         args.resume_path, 
-        args.save_dir
+        args.save_dir,
+        C,
+        H,
+        W,
+        N,
     )
 
     elif args.mode == 'inference':
