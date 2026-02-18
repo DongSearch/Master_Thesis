@@ -198,7 +198,7 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
                 'optimizer_state_dict': opt.state_dict(), 
                 'loss': avg_train_loss,
             }
-            save_path = os.path.join(save_dir, f"reg_mnist_ep{epoch+1}.pth")
+            save_path = os.path.join(save_dir, f"reg_cifar10_ep{epoch+1}.pth")
             torch.save(checkpoint, save_path)
             print(f"checkpoint saved to {save_path}")
             print("Generating samples for FID and Visualization...")

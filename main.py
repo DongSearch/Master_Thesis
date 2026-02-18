@@ -37,12 +37,12 @@ def main():
     if args.data_type == "cifar_10":
         C,H,W,N,D,NH = 3,32,32,10,14,12
     elif args.data_type == "mnist":
-        C,H,W,N,D,NH = 1,28,28,10,6,8
+        C,H,W,N,D,NH = 1,28,28,10,6,6
 
     if args.mode == 'train':
         print(f"🔥 Starting Training on {device}...")
         model = SmallREG(input_size=H, patch_size=2, in_channels=C, hidden_size=384, depth=D, num_heads = NH,
-                         high_low_split=args.high_block_proportion, split_threshold= args.threshold).to(device)
+                         high_low_split=args.high_block_proportion, split_threshold= args.threshold, overlap=0.1).to(device)
         diffusion = Diffusion(num_classes=N)
         train(
         args.data_path, 

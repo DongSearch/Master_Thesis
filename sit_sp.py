@@ -150,7 +150,8 @@ class SmallREG(nn.Module):
                  num_classes=10,
                  class_dropout_prob=0.1,
                  high_low_split = 0.5,
-                 split_threshold = 0.5
+                 split_threshold = 0.5,
+                 overlap = 0.0
                  ):
         super().__init__()
         self.input_size = input_size
@@ -163,6 +164,7 @@ class SmallREG(nn.Module):
         self.class_dropout_prob = class_dropout_prob
         self.high_low_split = high_low_split
         self.split_threshold = split_threshold
+        self.overlap = overlap
         
         #1. Patch Embedder(32*32 ->16*16 = 256 patches)
         self.x_embedder = PatchEmbed(input_size, patch_size, in_channels, hidden_size)
@@ -184,19 +186,23 @@ class SmallREG(nn.Module):
             SiTBlock(hidden_size, num_heads) for _ in range(depth)
         ])
 
-        self.final_layer = FinalLayer(hidden_size, patch_size, in_channels)
+        self.final_layer_low = FinalLayer(hidden_size, patch_size, in_channels)
+        self.final_layer_high = FinalLayer(hidden_size, patch_size, in_channels)
         self.initialize_weights()
 
     def initialize_weights(self):
         # nn.init.normal_(self.pos_embed, std =0.02) # low std -> less meaningful, high std-> unstable attention
+        nn.init.constant_(self.y_embedder.weight, 0)
         for block in self.blocks:
             # nn.init.constant_(block.adaLN_modulation[-1].weight,0)
             nn.init.normal_(block.adaLN_modulation[-1].weight, std=1e-4)
             nn.init.constant_(block.adaLN_modulation[-1].bias,0)
-        nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight,0)
-        nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias,0)
-        # nn.init.constant_(self.final_layer.linear.weight,0)
-        # nn.init.constant_(self.final_layer.linear.bias,0)
+        # nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight,0)
+        # nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias,0)
+        nn.init.constant_(self.final_layer_low.adaLN_modulation[-1].weight, 0)
+        nn.init.constant_(self.final_layer_low.adaLN_modulation[-1].bias, 0)
+        nn.init.constant_(self.final_layer_high.adaLN_modulation[-1].weight, 0)
+        nn.init.constant_(self.final_layer_high.adaLN_modulation[-1].bias, 0)
 
     def unpatchify(self, x):
         # (N,T, patch_size**2 *C) ->(N,C,H,W)
@@ -232,6 +238,7 @@ class SmallREG(nn.Module):
 
 
         split_idx = int(self.depth * self.high_low_split)
+        overlap = int(self.overlap * self.depth)
 
         threshold = self.split_threshold
         # t [0,1000]
@@ -239,38 +246,33 @@ class SmallREG(nn.Module):
 
         high_noise_indices = (t_norm > threshold).nonzero().squeeze(-1)
         low_noise_indices = (t_norm <= threshold).nonzero().squeeze(-1)
+        B,L,_= x.shape
+        patch_dim = self.patch_size * self.patch_size * self.in_channels
 
-        concat_high_low_block = x.clone()
+        concat_high_low_block = x.new_zeros(B, L-1,patch_dim)
         
         #global semantic (high_noise / low_frequency)
         if len(high_noise_indices) > 0 :
             x_high = x[high_noise_indices]
             c_high = c[high_noise_indices]
 
-            for block in self.blocks[ split_idx:]:
+            for block in self.blocks[split_idx- overlap:]:
                 x_high = block(x_high,c_high)
 
-            concat_high_low_block[high_noise_indices] = x_high 
+            concat_high_low_block[high_noise_indices] = self.final_layer_high(x_high[:,1:],c_high).to(concat_high_low_block.dtype)
         #local detail (low_noise/high_freqeuncy)
         if len(low_noise_indices) > 0 :
             x_low = x[low_noise_indices]
             c_low = c[low_noise_indices]
 
-            for block in self.blocks[:split_idx ]:
+            for block in self.blocks[:split_idx + overlap]:
                 x_low = block(x_low,c_low)
 
-            concat_high_low_block[low_noise_indices] = x_low   
+            concat_high_low_block[low_noise_indices] = self.final_layer_low(x_low[:,1:],c_low).to(concat_high_low_block.dtype)  
 
     
-
-
-        # final layer
-        x = concat_high_low_block[:,1:,:] # (N,L,D) - remove class token
-        # x = x[:,1:,:]
-        x = self.final_layer(x,c) # (N,L,P*P*C)
-
         # unpatchfiy
-        x = self.unpatchify(x) # (N,C,H,W)
+        x = self.unpatchify(concat_high_low_block) # (N,C,H,W)
 
         return x
     
