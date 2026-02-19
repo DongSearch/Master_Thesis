@@ -192,7 +192,7 @@ class SmallREG(nn.Module):
 
     def initialize_weights(self):
         # nn.init.normal_(self.pos_embed, std =0.02) # low std -> less meaningful, high std-> unstable attention
-        nn.init.constant_(self.y_embedder.weight, 0)
+        nn.init.constant_(self.y_embedder.weight, std = 0.02)
         for block in self.blocks:
             # nn.init.constant_(block.adaLN_modulation[-1].weight,0)
             nn.init.normal_(block.adaLN_modulation[-1].weight, std=1e-4)
@@ -241,7 +241,7 @@ class SmallREG(nn.Module):
         overlap = int(self.overlap * self.depth)
 
         threshold = self.split_threshold
-        # t [0,1000]
+        # t [0,1000]q
         t_norm = t / 1000.0 if torch.max(t) > 1.0 else t
 
         high_noise_indices = (t_norm > threshold).nonzero().squeeze(-1)

@@ -8,7 +8,7 @@ import numpy as np
 def run_inference(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    model = SmallREG(input_size=32,patch_size=2, in_channels=3,hidden_size=384, depth=10).to(device)
+    model = SmallREG(input_size=32,patch_size=2, in_channels=3,hidden_size=384, depth=14).to(device)
     model_path = args.model_path
     batch_size = args.batch_size
     num_samples = args.num_samples
