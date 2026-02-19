@@ -173,7 +173,7 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
         wandb.log({"epoch": epoch + 1, "train_mse": avg_train_loss, "val_mse": avg_val_loss})
         
         test_labels = torch.arange(0, N).to(device)  # 10개 클래스 샘플링
-        samples, _ = diffusion.sample(model, 10, test_labels, cfg_scale=2.0,C=C,H=H,W=W) # T=1000 고품질
+        samples, _ = diffusion.sample(model, 10, test_labels, cfg_scale=3.0,C=C,H=H,W=W) # T=1000 고품질
 
         # 이미지 그리드 생성 및 저장
         # save_dir 내부에 'samples' 폴더 생성
