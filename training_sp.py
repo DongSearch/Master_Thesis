@@ -24,6 +24,34 @@ except ImportError:
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+class EMA:
+    def __init__(self, model, decay=0.9999):
+        self.model = model
+        self.decay = decay
+        # 가중치를 복사해서 저장할 'Shadow' 파라미터 생성
+        self.shadow = {name: param.clone().detach() for name, param in model.named_parameters()}
+        self.device = next(model.parameters()).device
+
+    def update(self):
+        with torch.no_grad():
+            for name, param in self.model.named_parameters():
+                if param.requires_grad:
+                    # Shadow = decay * Shadow + (1 - decay) * Current
+                    new_average = (1.0 - self.decay) * param.data + self.decay * self.shadow[name]
+                    self.shadow[name].copy_(new_average)
+
+    def apply_shadow(self):
+        """샘플링이나 검증 시 Shadow 가중치를 모델에 덮어씌움"""
+        self.backup = {name: param.clone().detach() for name, param in self.model.named_parameters()}
+        for name, param in self.model.named_parameters():
+            param.data.copy_(self.shadow[name])
+
+    def restore_backup(self):
+        """학습을 재개하기 위해 원래 가중치로 복구"""
+        for name, param in self.model.named_parameters():
+            param.data.copy_(self.backup[name])
+        del self.backup
+
 class Diffusion:
     def __init__(self, T=1000,beta_start=1e-4, beta_end=0.02,num_classes=10):
         self.T = T
@@ -112,6 +140,7 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
     scaler = GradScaler()
     opt = optim.AdamW(model.parameters(),lr=lr)
     criterion = nn.MSELoss()
+    ema = EMA(model, decay = 0.999)
 
     fid = FrechetInceptionDistance(feature=64).to(device) if HAS_FID else None
 
@@ -122,8 +151,15 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
         print(f"resuming training from {resume_path}")
         checkpoint = torch.load(resume_path, map_location=device)
         model.load_state_dict(checkpoint['model_state_dict'])
+        if 'ema_state_dict' in checkpoint:
+            for name, param in ema.shadow.items():
+                ema.shadow[name].copy_(checkpoint['ema_state_dict'][name])
+            print("Loaded EMA weights successfully!")
+
         opt.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint['epoch'] + 1
+
+
         print(f"loaded check point! resuming from epoch{start_epoch + 1}")
     else :
         print("starting training from scratch")
@@ -149,6 +185,7 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
             scaler.scale(loss).backward()
             scaler.step(opt)
             scaler.update()
+            ema.update()
 
             epoch_loss += loss.item()
             pbar.set_postfix(MSE=loss.item())
@@ -172,8 +209,10 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
         print(f"Epoch {epoch+1}: Train MSE: {avg_train_loss:.4f}, Val MSE: {avg_val_loss:.4f}")
         wandb.log({"epoch": epoch + 1, "train_mse": avg_train_loss, "val_mse": avg_val_loss})
         
+        ema.apply_shadow()
         test_labels = torch.arange(0, N).to(device)  # 10개 클래스 샘플링
         samples, _ = diffusion.sample(model, 10, test_labels, cfg_scale=3.0,C=C,H=H,W=W) # T=1000 고품질
+        ema.restore_backup()
 
         # 이미지 그리드 생성 및 저장
         # save_dir 내부에 'samples' 폴더 생성
@@ -195,6 +234,7 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
             checkpoint = {
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
+                'ema_state_dict': ema.shadow,
                 'optimizer_state_dict': opt.state_dict(), 
                 'loss': avg_train_loss,
             }
