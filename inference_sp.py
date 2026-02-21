@@ -8,7 +8,7 @@ import numpy as np
 def run_inference(args):
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    model = SmallREG(input_size=32,patch_size=2, in_channels=3,hidden_size=384, depth=14).to(device)
+    model = SmallREG(input_size=32,patch_size=2, in_channels=3,hidden_size=384, depth=16).to(device)
     model_path = args.model_path
     batch_size = args.batch_size
     num_samples = args.num_samples
@@ -20,10 +20,14 @@ def run_inference(args):
     
     checkpoint = torch.load(model_path,map_location=device)
 
-    if 'model_state_dict' in checkpoint :
+    if 'ema_state_dict' in checkpoint:
+        print("✅ EMA weights found! Loading EMA state_dict for better generation quality...")
+        model.load_state_dict(checkpoint['ema_state_dict'], strict=False)
+    elif 'model_state_dict' in checkpoint:
+        print("⚠️ EMA weights NOT found. Loading standard model_state_dict...")
         model.load_state_dict(checkpoint['model_state_dict'])
     else:
-        model.loade_state_dict(checkpoint)
+        model.load_state_dict(checkpoint)
     
     model.eval()
     diffusion = Diffusion(num_classes=10)
@@ -33,8 +37,10 @@ def run_inference(args):
     num_batches = num_samples// batch_size
 
     for i in range(num_batches):
-        labels = torch.randint(0,10,(batch_size,)).to(device)
-        samples, duration = diffusion.sample(model, batch_size,labels, cfg_scale=3.0)
+        labels = torch.arange(0,10).to(device)
+        labels = labels.unsqueeze(0).repeat(batch_size//10,1)
+
+        samples, duration = diffusion.sample(model, batch_size,labels, cfg_scale=4.0)
         all_samples.append(samples.cpu())
         time_stats.append(duration)
 

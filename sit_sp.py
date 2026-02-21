@@ -194,8 +194,8 @@ class SmallREG(nn.Module):
         # nn.init.normal_(self.pos_embed, std =0.02) # low std -> less meaningful, high std-> unstable attention
         nn.init.normal_(self.y_embedder.weight, std = 0.02)
         for block in self.blocks:
-            # nn.init.constant_(block.adaLN_modulation[-1].weight,0)
-            nn.init.normal_(block.adaLN_modulation[-1].weight, std=1e-4)
+            nn.init.constant_(block.adaLN_modulation[-1].weight,0)
+            # nn.init.normal_(block.adaLN_modulation[-1].weight, std=1e-4)
             nn.init.constant_(block.adaLN_modulation[-1].bias,0)
         # nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight,0)
         # nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias,0)
@@ -229,9 +229,9 @@ class SmallREG(nn.Module):
             y = torch.where(keep_mask,y, torch.tensor(self.num_classes, device=y.device))
 
         y_emb = self.y_embedder(y) #(N,D)
-        y_emb = y_emb.unsqueeze(1) + self.pos_embed[:, :1, :]
-        x = torch.cat([y_emb,x],dim=1) #(N,L+1,D)
-        c = t_emb
+        y_token = y_emb.unsqueeze(1) + self.pos_embed[:, :1, :]
+        x = torch.cat([y_token,x],dim=1) #(N,L+1,D)
+        c = t_emb + y_emb
 
         # for block in self.blocks:
         #     x = block(x,c)
