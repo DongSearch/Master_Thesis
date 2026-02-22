@@ -185,9 +185,13 @@ class SmallREG(nn.Module):
         self.blocks = nn.ModuleList([
             SiTBlock(hidden_size, num_heads) for _ in range(depth)
         ])
+        self.adapter = nn.Sequential(
+            nn.Linear(hidden_size,hidden_size),
+            nn.GELU(),
+            nn.Linear(hidden_size,hidden_size)
+        )
 
-        self.final_layer_low = FinalLayer(hidden_size, patch_size, in_channels)
-        self.final_layer_high = FinalLayer(hidden_size, patch_size, in_channels)
+        self.final_layer = FinalLayer(hidden_size, patch_size, in_channels)
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -199,10 +203,8 @@ class SmallREG(nn.Module):
             nn.init.constant_(block.adaLN_modulation[-1].bias,0)
         # nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight,0)
         # nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias,0)
-        nn.init.constant_(self.final_layer_low.adaLN_modulation[-1].weight, 0)
-        nn.init.constant_(self.final_layer_low.adaLN_modulation[-1].bias, 0)
-        nn.init.constant_(self.final_layer_high.adaLN_modulation[-1].weight, 0)
-        nn.init.constant_(self.final_layer_high.adaLN_modulation[-1].bias, 0)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
+        nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
 
     def unpatchify(self, x):
         # (N,T, patch_size**2 *C) ->(N,C,H,W)
@@ -231,7 +233,7 @@ class SmallREG(nn.Module):
         y_emb = self.y_embedder(y) #(N,D)
         y_token = y_emb.unsqueeze(1) + self.pos_embed[:, :1, :]
         x = torch.cat([y_token,x],dim=1) #(N,L+1,D)
-        c = t_emb + y_emb
+        c = t_emb + y_emb # (N,D)
 
         # for block in self.blocks:
         #     x = block(x,c)
@@ -249,30 +251,36 @@ class SmallREG(nn.Module):
         B,L,_= x.shape
         patch_dim = self.patch_size * self.patch_size * self.in_channels
 
-        concat_high_low_block = x.new_zeros(B, L-1,patch_dim)
+        x_concat = torch.zeros_like(x)
         
         #global semantic (high_noise / low_frequency)
         if len(high_noise_indices) > 0 :
             x_high = x[high_noise_indices]
             c_high = c[high_noise_indices]
-
-            for block in self.blocks[split_idx- overlap:]:
+            x_high = x_high
+            for block in self.blocks[ : overlap] :
                 x_high = block(x_high,c_high)
 
-            concat_high_low_block[high_noise_indices] = self.final_layer_high(x_high[:,1:],c_high).to(concat_high_low_block.dtype)
+            for block in self.blocks[split_idx:]:
+                x_high = block(x_high,c_high)
+            
+            x_concat[high_noise_indices] = x_high
+
         #local detail (low_noise/high_freqeuncy)
         if len(low_noise_indices) > 0 :
             x_low = x[low_noise_indices]
             c_low = c[low_noise_indices]
 
-            for block in self.blocks[:split_idx + overlap]:
+            for block in self.blocks[:split_idx]:
                 x_low = block(x_low,c_low)
 
-            concat_high_low_block[low_noise_indices] = self.final_layer_low(x_low[:,1:],c_low).to(concat_high_low_block.dtype)  
-
-    
-        # unpatchfiy
-        x = self.unpatchify(concat_high_low_block) # (N,C,H,W)
+            for block in self.blocks[max(split_idx, self.depth - overlap):]:
+                x_low = block(x_low,c_low)
+            x_concat[low_noise_indices] = x_low
+        
+        x = x_concat
+        x = self.final_layer(x[:,1:],c)
+        x = self.unpatchify(x) # (N,C,H,W)
 
         return x
     
@@ -283,7 +291,6 @@ class SmallREG(nn.Module):
 
 
    
-
     
 
         

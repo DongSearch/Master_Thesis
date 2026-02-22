@@ -75,9 +75,11 @@ class Diffusion:
         x_t = sqrt_alpha_bar * x + sqrt_one_mius_alpha_bar * epsilon
         return x_t, epsilon
     
-    def sample(self,model,batch_size,labels,cfg_scale=3.0, C=3,H=32,W=32):
+    def sample(self,model,batch_size,labels,cfg_scale=3.0, C=3,H=32,W=32,seed = None):
         model.eval()
         start_time = time.time()
+        if seed is not None:
+            torch.manual_seed(seed)
 
         
 
@@ -211,7 +213,7 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
         
         ema.apply_shadow()
         test_labels = torch.arange(0, N).to(device)  # 10개 클래스 샘플링
-        samples, _ = diffusion.sample(model, 10, test_labels, cfg_scale=3.0,C=C,H=H,W=W) # T=1000 고품질
+        samples, _ = diffusion.sample(model, 10, test_labels, cfg_scale=3.0,C=C,H=H,W=W,seed = 42) # T=1000 고품질
         ema.restore_backup()
 
         # 이미지 그리드 생성 및 저장
