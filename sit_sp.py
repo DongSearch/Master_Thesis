@@ -197,6 +197,11 @@ class SmallREG(nn.Module):
     def initialize_weights(self):
         # nn.init.normal_(self.pos_embed, std =0.02) # low std -> less meaningful, high std-> unstable attention
         nn.init.normal_(self.y_embedder.weight, std = 0.02)
+        for m in self.adapter:
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.constant_(m.bias, 0)
+                
         for block in self.blocks:
             nn.init.constant_(block.adaLN_modulation[-1].weight,0)
             # nn.init.normal_(block.adaLN_modulation[-1].weight, std=1e-4)
@@ -242,43 +247,31 @@ class SmallREG(nn.Module):
         split_idx = int(self.depth * self.high_low_split)
         overlap = int(self.overlap * self.depth)
 
-        threshold = self.split_threshold
         # t [0,1000]q
         t_norm = t / 1000.0 if torch.max(t) > 1.0 else t
-
-        high_noise_indices = (t_norm > threshold).nonzero().squeeze(-1)
-        low_noise_indices = (t_norm <= threshold).nonzero().squeeze(-1)
-        B,L,_= x.shape
-        patch_dim = self.patch_size * self.patch_size * self.in_channels
-
-        x_concat = torch.zeros_like(x)
+        high_mask = t_norm > self.split_threshold
+        low_mask = ~high_mask
         
-        #global semantic (high_noise / low_frequency)
-        if len(high_noise_indices) > 0 :
-            x_high = x[high_noise_indices]
-            c_high = c[high_noise_indices]
-            x_high = x_high
-            for block in self.blocks[ : overlap] :
-                x_high = block(x_high,c_high)
-
-            for block in self.blocks[split_idx:]:
-                x_high = block(x_high,c_high)
+        for i, block in enumerate(self.blocks):
+        # i: 현재 블록 번호 (0~7)
+        # 1. 공통 블록 (Overlap) - 항상 작동
+            if i < overlap or i > self.depth - overlap: 
+                x = block(x, c)
+            else:
+                x_new = x.clone()
+                # High일 때는 뒤쪽 블록(4,5,6) 위주로, Low일 때는 앞쪽(2,3) 위주로
+                if high_mask.any() and i >= (self.depth // 2):
+                    x_new[high_mask] = block(x[high_mask], c[high_mask])
+                
+                # Low-t 전문 블록 (예: 앞쪽 절반의 전문가 블록들)
+                elif low_mask.any() and i < (self.depth // 2):
+                    x_new[low_mask] = block(x[low_mask], c[low_mask])
+                
+                # 만약 High 구간인데 Low 전용 블록을 만났다면? 
+                # -> 그냥 통과(Identity) 하되, Shared 구간이 분포를 잡아줌
+                x = x_new
             
-            x_concat[high_noise_indices] = x_high
-
-        #local detail (low_noise/high_freqeuncy)
-        if len(low_noise_indices) > 0 :
-            x_low = x[low_noise_indices]
-            c_low = c[low_noise_indices]
-
-            for block in self.blocks[:split_idx]:
-                x_low = block(x_low,c_low)
-
-            for block in self.blocks[max(split_idx, self.depth - overlap):]:
-                x_low = block(x_low,c_low)
-            x_concat[low_noise_indices] = x_low
-        
-        x = x_concat
+        x = self.adapter(x)
         x = self.final_layer(x[:,1:],c)
         x = self.unpatchify(x) # (N,C,H,W)
 
