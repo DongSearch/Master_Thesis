@@ -185,6 +185,8 @@ def train(data_path,model, diffusion, epochs= 100, batch_size=64, lr=3e-4,resume
                 loss = criterion(predicted_noise,noise)
             opt.zero_grad()
             scaler.scale(loss).backward()
+            scaler.unscale_(opt)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) 
             scaler.step(opt)
             scaler.update()
             ema.update()

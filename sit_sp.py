@@ -186,6 +186,7 @@ class SmallREG(nn.Module):
             SiTBlock(hidden_size, num_heads) for _ in range(depth)
         ])
         self.adapter = nn.Sequential(
+            nn.LayerNorm(hidden_size),
             nn.Linear(hidden_size,hidden_size),
             nn.GELU(),
             nn.Linear(hidden_size,hidden_size)
@@ -197,17 +198,16 @@ class SmallREG(nn.Module):
     def initialize_weights(self):
         # nn.init.normal_(self.pos_embed, std =0.02) # low std -> less meaningful, high std-> unstable attention
         nn.init.normal_(self.y_embedder.weight, std = 0.02)
-        for m in self.adapter:
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                nn.init.constant_(m.bias, 0)
-                
+        
+        nn.init.constant_(self.adapter[1].weight, 0) # Linear 층
+        nn.init.constant_(self.adapter[1].bias, 0)
+        nn.init.constant_(self.adapter[3].weight, 0) # Linear 층
+        nn.init.constant_(self.adapter[3].bias, 0)
+        
         for block in self.blocks:
             nn.init.constant_(block.adaLN_modulation[-1].weight,0)
             # nn.init.normal_(block.adaLN_modulation[-1].weight, std=1e-4)
             nn.init.constant_(block.adaLN_modulation[-1].bias,0)
-        # nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight,0)
-        # nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias,0)
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].weight, 0)
         nn.init.constant_(self.final_layer.adaLN_modulation[-1].bias, 0)
 
@@ -271,7 +271,7 @@ class SmallREG(nn.Module):
                 # -> 그냥 통과(Identity) 하되, Shared 구간이 분포를 잡아줌
                 x = x_new
             
-        x = self.adapter(x)
+        x = x + self.adapter(x)
         x = self.final_layer(x[:,1:],c)
         x = self.unpatchify(x) # (N,C,H,W)
 
